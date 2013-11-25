@@ -9,16 +9,16 @@ use MIME::Base64;
 use Time::HiRes;
 use POSIX;
 
-my $SHA1_CALCULATOR = undef;
+my $CREATE_SHA1_OBJ = undef;
 
 {
     # Check for availability of SHA-1 ...
     local $@; # don't leak an error condition
-    eval { require Digest::SHA;  $SHA1_CALCULATOR = Digest::SHA->new(1) } ||
-    eval { require Digest::SHA1; $SHA1_CALCULATOR = Digest::SHA1->new() } ||
+    eval { require Digest::SHA;  $CREATE_SHA1_OBJ = sub { Digest::SHA->new(1) }; } ||
+    eval { require Digest::SHA1; $CREATE_SHA1_OBJ = sub { Digest::SHA1->new() }; } ||
     eval {
         require Digest::SHA::PurePerl;
-        $SHA1_CALCULATOR = Digest::SHA::PurePerl->new(1)
+        $CREATE_SHA1_OBJ = sub { Digest::SHA::PurePerl->new(1) };
     };
 };
 
@@ -269,7 +269,7 @@ SHA-1 based UUID without an appropriate module available.
 =cut
 
 sub UUID_SHA1_AVAIL {
-    return defined $SHA1_CALCULATOR ? 1 : 0;
+    return defined $CREATE_SHA1_OBJ ? 1 : 0;
 }
 
 =back
@@ -435,19 +435,19 @@ sub _create_v5_uuid {
     my $name    = shift;
     my $uuid    = '';
 
-    if (!$SHA1_CALCULATOR) {
+    if (!$CREATE_SHA1_OBJ) {
         croak __PACKAGE__
             . '::create_uuid(): No SHA-1 implementation available! '
             . 'Please install Digest::SHA1, Digest::SHA or '
             . 'Digest::SHA::PurePerl to use SHA-1 based UUIDs.'
             ;
     }
+    my $sha1_obj = $CREATE_SHA1_OBJ->();
 
-    $SHA1_CALCULATOR->reset();
-    $SHA1_CALCULATOR->add($ns_uuid);
+    $sha1_obj->add($ns_uuid);
 
     if ( ref($name) =~ m/^(?:GLOB|IO::)/ ) {
-        $SHA1_CALCULATOR->addfile($name);
+        $sha1_obj->addfile($name);
     } elsif ( ref $name ) {
         croak __PACKAGE__
             . '::create_uuid(): Name for v5 UUID'
@@ -455,15 +455,16 @@ sub _create_v5_uuid {
             . ref($name) .'!'
             ;
     } elsif ( defined $name ) {
-        $SHA1_CALCULATOR->add($name);
+        $sha1_obj->add($name);
     } else {
         croak __PACKAGE__ 
             . '::create_uuid(): Name for v5 UUID is not defined!';
     }
 
     # Use only first 16 Bytes ...
-    $uuid = substr( $SHA1_CALCULATOR->digest(), 0, 16 );
+    $uuid = substr( $sha1_obj->digest(), 0, 16 );
 
+    undef $sha1_obj;
     return _set_uuid_version($uuid, 0x50);
 }
 
